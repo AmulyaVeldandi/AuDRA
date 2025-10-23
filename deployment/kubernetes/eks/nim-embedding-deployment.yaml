@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nim-embedding
+  namespace: audra-rad
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nim-embedding
+  template:
+    metadata:
+      labels:
+        app: nim-embedding
+    spec:
+      containers:
+        - name: nim-embedding
+          image: nvcr.io/placeholder/nim-embedding:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "4"
+              memory: 8Gi
+            requests:
+              cpu: "2"
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10

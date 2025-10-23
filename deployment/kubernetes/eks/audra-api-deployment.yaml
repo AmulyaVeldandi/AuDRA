@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audra-api
+  namespace: audra-rad
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: audra-api
+  template:
+    metadata:
+      labels:
+        app: audra-api
+    spec:
+      containers:
+        - name: audra-api
+          image: your-registry/audra-api:latest
+          env:
+            - name: NIM_LLM_ENDPOINT
+              value: http://nim-llm:8000
+            - name: NIM_EMBEDDING_ENDPOINT
+              value: http://nim-embedding:8000
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10

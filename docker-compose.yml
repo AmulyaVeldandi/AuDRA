@@ -1,0 +1,25 @@
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: deployment/docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - NIM_LLM_ENDPOINT=http://nim-llm:8000
+      - NIM_EMBEDDING_ENDPOINT=http://nim-embedding:8000
+    depends_on:
+      - nim-llm
+      - nim-embedding
+
+  nim-llm:
+    image: nvcr.io/placeholder/nim-llm:latest
+    ports:
+      - "8001:8000"
+
+  nim-embedding:
+    image: nvcr.io/placeholder/nim-embedding:latest
+    ports:
+      - "8002:8000"

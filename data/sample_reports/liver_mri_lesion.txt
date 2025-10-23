@@ -1,0 +1,3 @@
+Examination: MRI Abdomen with contrast
+Findings: 1.5 cm hypervascular lesion in hepatic segment VIII.
+Impression: Recommend dedicated follow-up based on ACR liver lesion guidelines.

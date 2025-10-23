@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vector-db
+  namespace: audra-rad
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vector-db
+  template:
+    metadata:
+      labels:
+        app: vector-db
+    spec:
+      containers:
+        - name: vector-db
+          image: opensearchproject/opensearch:latest
+          ports:
+            - containerPort: 9200

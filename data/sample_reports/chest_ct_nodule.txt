@@ -1,0 +1,3 @@
+Examination: CT Chest with contrast
+Findings: Solid pulmonary nodule in the left lower lobe measuring 8 mm.
+Impression: Consider Fleischner 2017 guidelines for surveillance.
