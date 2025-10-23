@@ -1,0 +1,47 @@
+{
+  "resourceType": "DiagnosticReport",
+  "id": "7d2f202c-336d-44cf-a686-6691291ff8f0",
+  "status": "final",
+  "code": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "24627-2",
+        "display": "CT Chest with contrast"
+      }
+    ],
+    "text": "CT Chest with contrast"
+  },
+  "subject": {
+    "reference": "Patient/patient-123"
+  },
+  "effectiveDateTime": "2025-10-19T19:04:53Z",
+  "performer": [
+    {
+      "reference": "Practitioner/radiologist-456"
+    }
+  ],
+  "conclusion": "Examination: CT Chest with contrast\nFindings: Solid pulmonary nodule in the left lower lobe measuring 8 mm.\nImpression: Consider Fleischner 2017 guidelines for surveillance.",
+  "contained": [
+    {
+      "resourceType": "Patient",
+      "id": "patient-123",
+      "identifier": [
+        {
+          "system": "http://hospital.smarthealth.org/mrn",
+          "value": "MRN-88430"
+        }
+      ],
+      "name": [
+        {
+          "family": "Johnson",
+          "given": [
+            "Marcus"
+          ]
+        }
+      ],
+      "gender": "male",
+      "birthDate": "1972-11-03"
+    }
+  ]
+}

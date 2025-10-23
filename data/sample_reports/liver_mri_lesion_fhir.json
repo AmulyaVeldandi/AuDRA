@@ -1,0 +1,47 @@
+{
+  "resourceType": "DiagnosticReport",
+  "id": "862dd64b-9fba-4aee-8b8b-cdf1d7472e6e",
+  "status": "final",
+  "code": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "42272-0",
+        "display": "MRI Liver"
+      }
+    ],
+    "text": "MRI Liver"
+  },
+  "subject": {
+    "reference": "Patient/patient-123"
+  },
+  "effectiveDateTime": "2025-10-17T19:04:53Z",
+  "performer": [
+    {
+      "reference": "Practitioner/radiologist-456"
+    }
+  ],
+  "conclusion": "Examination: MRI Abdomen with contrast\nFindings: 1.5 cm hypervascular lesion in hepatic segment VIII.\nImpression: Recommend dedicated follow-up based on ACR liver lesion guidelines.",
+  "contained": [
+    {
+      "resourceType": "Patient",
+      "id": "patient-123",
+      "identifier": [
+        {
+          "system": "http://hospital.smarthealth.org/mrn",
+          "value": "MRN-30017"
+        }
+      ],
+      "name": [
+        {
+          "family": "Singh",
+          "given": [
+            "Ritu"
+          ]
+        }
+      ],
+      "gender": "other",
+      "birthDate": "1958-02-24"
+    }
+  ]
+}

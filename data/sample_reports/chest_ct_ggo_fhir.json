@@ -1,0 +1,48 @@
+{
+  "resourceType": "DiagnosticReport",
+  "id": "f47164b3-51e1-4a10-8ccc-4aa6855bf7a4",
+  "status": "final",
+  "code": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "71250-2",
+        "display": "CT Chest without contrast"
+      }
+    ],
+    "text": "CT Chest without contrast"
+  },
+  "subject": {
+    "reference": "Patient/patient-123"
+  },
+  "effectiveDateTime": "2025-10-21T19:04:53Z",
+  "performer": [
+    {
+      "reference": "Practitioner/radiologist-456"
+    }
+  ],
+  "conclusion": "Examination: CT Chest without contrast\nFindings: Ground-glass opacities in the right upper lobe measuring 12 mm.\nImpression: Suggest follow-up imaging in 3 months to confirm resolution.",
+  "contained": [
+    {
+      "resourceType": "Patient",
+      "id": "patient-123",
+      "identifier": [
+        {
+          "system": "http://hospital.smarthealth.org/mrn",
+          "value": "MRN-44521"
+        }
+      ],
+      "name": [
+        {
+          "family": "Nguyen",
+          "given": [
+            "Alice",
+            "M."
+          ]
+        }
+      ],
+      "gender": "female",
+      "birthDate": "1980-05-12"
+    }
+  ]
+}

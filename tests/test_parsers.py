@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import base64
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Iterable
 
-import pytest
-
-from src.parsers.fhir_parser import parse_diagnostic_report
+from src.parsers.fhir_parser import FHIRParser
 from src.parsers.report_parser import parse_report
 
 
@@ -64,31 +65,57 @@ def test_parse_report_detects_liver_lesion_li_rads() -> None:
 
 
 def test_parse_diagnostic_report_combines_conclusion_and_presented_form() -> None:
+    parser = FHIRParser()
+    report_path = Path('data/sample_reports/chest_ct_ggo_fhir.json')
+    report_data = json.loads(report_path.read_text(encoding='utf-8'))
+
+    report_text, patient = parser.parse_diagnostic_report(report_data)
+
+    assert 'Ground-glass opacities' in report_text
+    assert patient['patient_id'] == 'patient-123'
+    assert patient['gender'] == 'female'
+    assert patient['mrn'] == 'MRN-44521'
+
+    birth_date = datetime.fromisoformat('1980-05-12T00:00:00').date()
+    today = datetime.now(timezone.utc).date()
+    expected_age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+    assert patient['age'] == expected_age
+
+
+def test_parse_diagnostic_report_falls_back_to_presented_form() -> None:
+    parser = FHIRParser()
     payload_text = (
         'FINDINGS:\n'
         '1. Right upper lobe pulmonary nodule as described above.\n'
         '2. No pleural effusion.\n'
     )
-    data_url = (
-        'data:text/plain;base64,'
-        + base64.b64encode('Presented form narrative from SIIM sample.'.encode('utf-8')).decode('utf-8')
-    )
     resource = {
         'resourceType': 'DiagnosticReport',
-        'conclusion': 'SIIM CT Chest impression: Stable RUL nodule.',
+        'id': 'report-1',
+        'status': 'final',
+        'code': {'text': 'CT Chest', 'coding': [{'system': 'http://loinc.org', 'code': '71250-2'}]},
+        'subject': {'reference': 'Patient/example'},
+        'effectiveDateTime': '2024-01-01T00:00:00Z',
         'presentedForm': [
             {
                 'contentType': 'text/plain',
                 'data': base64.b64encode(payload_text.encode('utf-8')).decode('utf-8'),
             },
-            {
-                'contentType': 'text/plain',
-                'url': data_url,
-            },
         ],
     }
 
-    combined = parse_diagnostic_report(resource)
-    assert 'SIIM CT Chest impression: Stable RUL nodule.' in combined
-    assert 'Right upper lobe pulmonary nodule' in combined
-    assert 'Presented form narrative from SIIM sample.' in combined
+    text, metadata = parser.parse_diagnostic_report(resource)
+    assert text.startswith('FINDINGS:')
+    assert metadata['patient_id'] == 'example'
+
+
+def test_validate_diagnostic_report_detects_missing_fields() -> None:
+    parser = FHIRParser()
+    invalid_report = {
+        'resourceType': 'DiagnosticReport',
+        'status': 'final',
+        'code': {'text': 'CT Chest'},
+        'effectiveDateTime': '2024-01-01T00:00:00Z',
+    }
+
+    assert parser.validate_diagnostic_report(invalid_report) is False
