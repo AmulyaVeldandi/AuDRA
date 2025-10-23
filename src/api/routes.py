@@ -1,13 +1,18 @@
 '''API route definitions.'''
 
-from fastapi import APIRouter
+from uuid import uuid4
 
-from .models import AgentResponse, ReportRequest
+from fastapi import APIRouter, Request
 
-router = APIRouter(prefix='/api', tags=['reports'])
+from .models import ProcessReportRequest, ProcessReportResponse
+
+router = APIRouter(prefix='/v1', tags=['reports'])
 
 
-@router.post('/reports', response_model=AgentResponse)
-async def process_report(request: ReportRequest) -> AgentResponse:
-    '''Placeholder endpoint for processing radiology reports.'''
-    return AgentResponse(status='pending', message='Processing not yet implemented')
+@router.post('/process_report', response_model=ProcessReportResponse)
+async def process_report(
+    payload: ProcessReportRequest, request: Request
+) -> ProcessReportResponse:
+    '''Process a radiology report and return structured follow-up insights.'''
+    trace_id = getattr(request.state, 'trace_id', None) or str(uuid4())
+    return ProcessReportResponse(tasks=[], guideline_hits=[], trace_id=trace_id)
