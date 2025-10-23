@@ -285,14 +285,6 @@ pytest tests/test_agent.py -v
 
 ---
 
-## 👥 Team
-
-**[Your Name]** - AI/ML Engineer  
-**[Team Member 2]** - Backend Developer  
-**[Team Member 3]** - Clinical Advisor (Radiologist)  
-
----
-
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) for details.
@@ -305,15 +297,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 - **AWS** for cloud infrastructure and credits
 - **Fleischner Society** and **ACR** for public medical guidelines
 - **Radiology community** for inspiration and problem validation
-
----
-
-## 📧 Contact
-
-**Questions?** Open an issue or reach out:
-- 📧 Email: team@audra-rad.com
-- 🐦 Twitter: [@AuDRARad](https://twitter.com/AuDRARad)
-- 💼 LinkedIn: [AuDRA-Rad](https://linkedin.com/company/audra-rad)
 
 ---
 
