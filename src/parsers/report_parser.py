@@ -1,336 +1,378 @@
-'''Extract structured findings from free-text radiology reports.'''
-
 from __future__ import annotations
 
-import math
+"""Extraction utilities for structuring narrative radiology reports."""
+
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, List, Optional, Tuple
+from uuid import uuid4
+
+# --------------------------------------------------------------------------- #
+# Section parsing utilities
+# --------------------------------------------------------------------------- #
 
 SECTION_HEADER_PATTERN = re.compile(
-    r'(?im)^(?P<header>[A-Za-z][A-Za-z0-9 /\\-]{1,60})\s*:\s*(?P<inline>.*)$'
+    r"(?im)^(?P<header>[A-Za-z][A-Za-z0-9 /\\-]{1,60})\s*:\s*(?P<inline>.*)$"
 )
 
-SECTION_ALIASES = {
-    'history': {
-        'history',
-        'clinical history',
-        'medical history',
-        'past history',
-        'previous history',
-    },
-    'indication': {
-        'indication',
-        'clinical indication',
-        'reason for exam',
-        'reason for study',
-        'reason for examination',
-        'reason for imaging',
-        'exam indication',
-    },
-    'comparison': {'comparison', 'comparisons'},
-    'technique': {'technique', 'exam technique'},
-    'findings': {
-        'findings',
-        'finding',
-        'findings and impression',
-        'findings & impression',
-        'results',
-        'observations',
-    },
-    'impression': {
-        'impression',
-        'impressions',
-        'conclusion',
-        'conclusions',
-        'assessment',
-        'opinion',
-        'summary',
-    },
+SECTION_ALIASES: Dict[str, Iterable[str]] = {
+    "findings": {"findings", "finding", "results", "observations"},
+    "impression": {"impression", "impressions", "conclusion", "assessment", "summary"},
 }
 
-NODULE_PATTERN = re.compile(r'\b(?:pulmonary\s+)?nodules?\b', re.IGNORECASE)
+# --------------------------------------------------------------------------- #
+# Extraction patterns
+# --------------------------------------------------------------------------- #
+
+SIZE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*(mm|millimeters?|cm|centimeters?)", re.IGNORECASE)
 SIZE_COMPOSITE_PATTERN = re.compile(
-    r'(?P<first>\d+(?:\.\d+)?)\s*(?:x|×|\u00d7)\s*(?P<second>\d+(?:\.\d+)?)\s*(?P<unit>mm|millimeters?|cm|centimeters?)',
+    r"(?P<first>\d+(?:\.\d+)?)\s*(?:x|×|\u00d7)\s*(?P<second>\d+(?:\.\d+)?)\s*(?P<unit>mm|millimeters?|cm|centimeters?)",
     re.IGNORECASE,
 )
-SIZE_PATTERN = re.compile(
-    r'(?P<size>\d+(?:\.\d+)?)\s*(?P<unit>mm|millimeters?|cm|centimeters?)', re.IGNORECASE
-)
-LOBE_PATTERNS = {
-    re.compile(r'\bright upper lobe\b', re.IGNORECASE): 'RUL',
-    re.compile(r'\bright middle lobe\b', re.IGNORECASE): 'RML',
-    re.compile(r'\bright lower lobe\b', re.IGNORECASE): 'RLL',
-    re.compile(r'\bleft upper lobe\b', re.IGNORECASE): 'LUL',
-    re.compile(r'\bleft lower lobe\b', re.IGNORECASE): 'LLL',
-    re.compile(r'\blingula\b', re.IGNORECASE): 'LINGULA',
-    re.compile(r'\brul\b', re.IGNORECASE): 'RUL',
-    re.compile(r'\brml\b', re.IGNORECASE): 'RML',
-    re.compile(r'\brll\b', re.IGNORECASE): 'RLL',
-    re.compile(r'\blul\b', re.IGNORECASE): 'LUL',
-    re.compile(r'\blll\b', re.IGNORECASE): 'LLL',
+
+LUNG_LOCATION_PATTERNS: Dict[re.Pattern[str], str] = {
+    re.compile(r"\bright upp(?:er)? lobe\b", re.IGNORECASE): "RUL",
+    re.compile(r"\bright mid(?:dle)? lobe\b", re.IGNORECASE): "RML",
+    re.compile(r"\bright low(?:er)? lobe\b", re.IGNORECASE): "RLL",
+    re.compile(r"\bleft upp(?:er)? lobe\b", re.IGNORECASE): "LUL",
+    re.compile(r"\bleft low(?:er)? lobe\b", re.IGNORECASE): "LLL",
+    re.compile(r"\blingula\b", re.IGNORECASE): "LINGULA",
+    re.compile(r"\brul\b", re.IGNORECASE): "RUL",
+    re.compile(r"\brml\b", re.IGNORECASE): "RML",
+    re.compile(r"\brll\b", re.IGNORECASE): "RLL",
+    re.compile(r"\blul\b", re.IGNORECASE): "LUL",
+    re.compile(r"\blll\b", re.IGNORECASE): "LLL",
 }
-NODULE_TYPE_PATTERNS = {
-    re.compile(r'\bsolid\b', re.IGNORECASE): 'solid',
-    re.compile(r'\bsubsolid\b', re.IGNORECASE): 'subsolid',
-    re.compile(r'\bpart(?:ial)?[-\s]?solid\b', re.IGNORECASE): 'part-solid',
-    re.compile(r'\bground[-\s]?glass\b', re.IGNORECASE): 'ground-glass',
+
+LIVER_SEGMENT_PATTERN = re.compile(r"\bsegment\s+(?P<segment>(?:[ivx]+|\d+))\b", re.IGNORECASE)
+BRAIN_LOCATION_PATTERN = re.compile(
+    r"\b(frontal|parietal|temporal|occipital|cerebellar|brainstem|basal ganglia|thalamus)\b", re.IGNORECASE
+)
+
+CHARACTERISTIC_PATTERNS: Dict[re.Pattern[str], str] = {
+    re.compile(r"\bground[-\s]?glass\b", re.IGNORECASE): "ground-glass",
+    re.compile(r"\bpart[-\s]?solid\b", re.IGNORECASE): "part-solid",
+    re.compile(r"\bsolid\b", re.IGNORECASE): "solid",
+    re.compile(r"\bsubsolid\b", re.IGNORECASE): "subsolid",
+    re.compile(r"\bspiculated\b", re.IGNORECASE): "spiculated",
+    re.compile(r"\bsmooth\b", re.IGNORECASE): "smooth",
+    re.compile(r"\bcalcified\b", re.IGNORECASE): "calcified",
+    re.compile(r"\birregular\b", re.IGNORECASE): "irregular",
+    re.compile(r"\blobulated\b", re.IGNORECASE): "lobulated",
+    re.compile(r"\bconsolidation\b", re.IGNORECASE): "consolidation",
 }
-GGO_PATTERN = re.compile(
-    r'\b(?:ground[-\s]?glass(?:\s+opacit(?:y|ies))?|ggo(?:s)?)\b', re.IGNORECASE
+
+FINDING_KEYWORDS = re.compile(
+    r"\b(nodule|mass|lesion|opacity|ground[-\s]?glass|consolidation|adenopathy|cyst|tumou?r|metastasis)\b",
+    re.IGNORECASE,
 )
-CONSOLIDATION_PATTERN = re.compile(r'\bconsolidation(?:s)?\b', re.IGNORECASE)
-LIRADS_PATTERN = re.compile(
-    r'\b(?:li-?rads\s*(?P<li>[0-9m]{1,2})|lr-?(?P<lr>[0-9m]{1,2}))\b', re.IGNORECASE
+
+UNCERTAINTY_PATTERN = re.compile(
+    r"\b(possible|possibly|probable|probably|suggests?|may represent|cannot exclude|indeterminate)\b",
+    re.IGNORECASE,
 )
+
+# --------------------------------------------------------------------------- #
+# Data structures
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class Finding:
+    finding_id: str
+    finding_type: str
+    size_mm: Optional[float] = None
+    location: str = ""
+    characteristics: List[str] = field(default_factory=list)
+    context: str = ""
+    confidence: float = 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Parser implementation
+# --------------------------------------------------------------------------- #
+
+
+class ReportParser:
+    """Structured finding extractor for narrative radiology reports."""
+
+    def parse(self, report_text: str) -> List[Finding]:
+        """Return structured findings extracted from the supplied report."""
+
+        if not isinstance(report_text, str):
+            return []
+
+        normalized = report_text.replace("\r\n", "\n").strip()
+        if not normalized:
+            return []
+
+        sections = _split_sections(normalized)
+        candidate_blocks: List[str] = []
+        for key in ("findings", "impression"):
+            candidate_blocks.extend(sections.get(key, []))
+        if not candidate_blocks:
+            candidate_blocks = [normalized]
+
+        findings: List[Finding] = []
+        seen_snippets: set[str] = set()
+        for block in candidate_blocks:
+            for snippet in self._split_into_statements(block):
+                key = snippet.lower()
+                if key in seen_snippets:
+                    continue
+                if not self._looks_like_finding(snippet):
+                    continue
+                finding = self._build_finding(snippet)
+                if finding is None:
+                    continue
+                seen_snippets.add(key)
+                findings.append(finding)
+        return findings
+
+    def extract_measurements(self, text: str) -> List[Tuple[float, str]]:
+        """Extract size measurements from the text, normalised to millimetres."""
+
+        measurements_with_pos: List[Tuple[int, float]] = []
+        consumed_spans: List[Tuple[int, int]] = []
+
+        for match in SIZE_COMPOSITE_PATTERN.finditer(text):
+            first = float(match.group("first"))
+            second = float(match.group("second"))
+            unit = match.group("unit")
+            values_mm = [self._to_mm(first, unit), self._to_mm(second, unit)]
+            measurements_with_pos.append((match.start(), round(max(values_mm), 1)))
+            consumed_spans.append(match.span())
+
+        for match in SIZE_PATTERN.finditer(text):
+            span = match.span()
+            if any(start <= span[0] < end for start, end in consumed_spans):
+                continue
+            value = float(match.group(1))
+            unit = match.group(2)
+            measurements_with_pos.append((match.start(), round(self._to_mm(value, unit), 1)))
+
+        measurements_with_pos.sort(key=lambda item: item[0])
+        return [(value, "mm") for _, value in measurements_with_pos]
+
+    def extract_locations(self, text: str) -> List[str]:
+        """Return normalised anatomical location labels."""
+
+        locations: List[str] = []
+        for pattern, label in LUNG_LOCATION_PATTERNS.items():
+            if pattern.search(text):
+                locations.append(label)
+
+        for match in LIVER_SEGMENT_PATTERN.finditer(text):
+            segment = match.group("segment").upper()
+            normalised = self._normalise_liver_segment(segment)
+            if normalised:
+                locations.append(f"Segment {normalised}")
+
+        for match in BRAIN_LOCATION_PATTERN.finditer(text):
+            locations.append(match.group(1).strip().title())
+
+        seen: set[str] = set()
+        unique_locations: List[str] = []
+        for location in locations:
+            if location not in seen:
+                seen.add(location)
+                unique_locations.append(location)
+        return unique_locations
+
+    def extract_characteristics(self, text: str) -> List[str]:
+        """Return descriptive characteristics mentioned in the text."""
+
+        characteristics: List[str] = []
+        for pattern, label in CHARACTERISTIC_PATTERNS.items():
+            if pattern.search(text):
+                characteristics.append(label)
+        seen: set[str] = set()
+        unique: List[str] = []
+        for characteristic in characteristics:
+            if characteristic not in seen:
+                seen.add(characteristic)
+                unique.append(characteristic)
+        return unique
+
+    def classify_finding_type(self, text: str, characteristics: List[str]) -> str:
+        """Infer the finding type using rules and extracted metadata."""
+
+        text_lower = text.lower()
+        measurements = self.extract_measurements(text)
+        size_mm = measurements[0][0] if measurements else None
+        locations = self.extract_locations(text)
+
+        if "ground-glass" in characteristics or "opacity" in text_lower:
+            return "opacity"
+        if "consolidation" in characteristics:
+            return "opacity"
+        if size_mm is not None and size_mm >= 30:
+            return "mass"
+        if "mass" in text_lower:
+            return "mass"
+        lung_locations = {"RUL", "RML", "RLL", "LUL", "LLL", "LINGULA"}
+        if locations and any(loc in lung_locations for loc in locations):
+            if size_mm is None or size_mm < 30 or "nodule" in text_lower:
+                return "nodule"
+        if "nodule" in text_lower and (size_mm is None or size_mm < 30):
+            return "nodule"
+        if "lesion" in text_lower:
+            return "lesion"
+        return "lesion"
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers
+    # ------------------------------------------------------------------ #
+
+    def _build_finding(self, snippet: str) -> Optional[Finding]:
+        measurements = self.extract_measurements(snippet)
+        size_mm = measurements[0][0] if measurements else None
+        locations = self.extract_locations(snippet)
+        characteristics = self.extract_characteristics(snippet)
+        finding_type = self.classify_finding_type(snippet, characteristics)
+        location_display = locations[0] if locations else ""
+        confidence = self._score_confidence(
+            snippet,
+            finding_type,
+            size_mm,
+            bool(location_display),
+            characteristics,
+        )
+
+        return Finding(
+            finding_id=uuid4().hex,
+            finding_type=finding_type,
+            size_mm=size_mm,
+            location=location_display,
+            characteristics=characteristics,
+            context=snippet.strip(),
+            confidence=confidence,
+        )
+
+    def _split_into_statements(self, block: str) -> List[str]:
+        statements: List[str] = []
+        for raw_line in block.splitlines():
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            stripped = re.sub(r"^\d+[\.\)]\s*", "", stripped)
+            stripped = stripped.lstrip("-•*").strip()
+            if not stripped:
+                continue
+            parts = re.split(r"(?<=[.])\s+(?=[A-Z])", stripped)
+            for part in parts:
+                candidate = part.strip()
+                if candidate:
+                    statements.append(candidate)
+        return statements
+
+    def _looks_like_finding(self, text: str) -> bool:
+        if len(text) < 12:
+            return False
+        if FINDING_KEYWORDS.search(text):
+            return True
+        return bool(self.extract_measurements(text))
+
+    def _score_confidence(
+        self,
+        snippet: str,
+        finding_type: str,
+        size_mm: Optional[float],
+        has_location: bool,
+        characteristics: List[str],
+    ) -> float:
+        detail_score = 0
+        if size_mm is not None:
+            detail_score += 1
+        if has_location:
+            detail_score += 1
+        if finding_type:
+            detail_score += 1
+        if characteristics:
+            detail_score += 1
+
+        if detail_score >= 3:
+            confidence = 0.92
+        elif detail_score == 2:
+            confidence = 0.78
+        elif detail_score == 1:
+            confidence = 0.62
+        else:
+            confidence = 0.5
+
+        if UNCERTAINTY_PATTERN.search(snippet):
+            confidence = max(0.4, confidence - 0.2)
+
+        return round(min(confidence, 0.99), 2)
+
+    def _to_mm(self, value: float, unit: str) -> float:
+        unit_lower = unit.lower()
+        if unit_lower.startswith("cm"):
+            return value * 10.0
+        return value
+
+    def _normalise_liver_segment(self, token: str) -> Optional[str]:
+        roman_map = {
+            "I": "I",
+            "II": "II",
+            "III": "III",
+            "IV": "IV",
+            "V": "V",
+            "VI": "VI",
+            "VII": "VII",
+            "VIII": "VIII",
+        }
+        token_clean = token.upper()
+        if token_clean in roman_map:
+            return roman_map[token_clean]
+        try:
+            value = int(token_clean)
+        except ValueError:
+            return None
+        if 1 <= value <= 8:
+            return ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"][value - 1]
+        return None
+
+
+# --------------------------------------------------------------------------- #
+# Convenience wrapper
+# --------------------------------------------------------------------------- #
+
+
+def parse_report(report_text: str) -> List[Finding]:
+    """Convenience wrapper returning findings using the default parser."""
+
+    parser = ReportParser()
+    return parser.parse(report_text)
+
+
+# --------------------------------------------------------------------------- #
+# Helper functions
+# --------------------------------------------------------------------------- #
 
 
 def _normalize_header(raw_header: str) -> str:
-    cleaned = re.sub(r'[^a-z0-9]+', ' ', raw_header.lower()).strip()
+    cleaned = re.sub(r"[^a-z0-9]+", " ", raw_header.lower()).strip()
     for canonical, synonyms in SECTION_ALIASES.items():
         if cleaned in synonyms:
             return canonical
     return cleaned
 
 
-def _split_sections(report: str) -> Dict[str, List[Dict[str, Any]]]:
+def _split_sections(report: str) -> Dict[str, List[str]]:
     matches = list(SECTION_HEADER_PATTERN.finditer(report))
-    sections: Dict[str, List[Dict[str, Any]]] = {}
+    if not matches:
+        return {}
+
+    sections: Dict[str, List[str]] = {}
     for idx, match in enumerate(matches):
-        header = match.group('header').strip()
-        inline = match.group('inline')
-        if inline:
-            content_start = match.start('inline')
-        else:
-            content_start = match.end()
-            if content_start < len(report) and report[content_start] == '\n':
-                content_start += 1
+        header = match.group("header").strip()
+        inline = match.group("inline")
+        content_start = match.start("inline") if inline else match.end()
         next_start = matches[idx + 1].start() if idx + 1 < len(matches) else len(report)
-        content = report[content_start:next_start].rstrip()
-        canonical = _normalize_header(header)
-        sections.setdefault(canonical, []).append(
-            {
-                'header': header,
-                'text': content.strip(),
-                'start': content_start,
-                'end': next_start,
-            }
-        )
-    return sections
-
-
-def _line_span(text: str, position: int) -> Tuple[int, int]:
-    start = text.rfind('\n', 0, position)
-    if start == -1:
-        start = 0
-    else:
-        start += 1
-    end = text.find('\n', position)
-    if end == -1:
-        end = len(text)
-    return start, end
-
-
-def _format_size(size_mm: float) -> str:
-    rounded = round(size_mm, 1)
-    if math.isclose(rounded, round(rounded, 0)):
-        rounded = round(rounded)
-    return f'size:{int(rounded)}mm' if isinstance(rounded, int) else f'size:{rounded}mm'
-
-
-def _extract_size_tag(snippet: str) -> Optional[str]:
-    sizes: List[float] = []
-    for match in SIZE_COMPOSITE_PATTERN.finditer(snippet):
-        unit = match.group('unit').lower()
-        values = [float(match.group('first')), float(match.group('second'))]
-        factor = 10.0 if unit.startswith('cm') else 1.0
-        sizes.extend(value * factor for value in values)
-    for match in SIZE_PATTERN.finditer(snippet):
-        unit = match.group('unit').lower()
-        value = float(match.group('size'))
-        factor = 10.0 if unit.startswith('cm') else 1.0
-        sizes.append(value * factor)
-    if not sizes:
-        return None
-    largest = max(sizes)
-    if largest <= 0:
-        return None
-    return _format_size(largest)
-
-
-def _extract_lobe_tag(snippet: str) -> Optional[str]:
-    for pattern, label in LOBE_PATTERNS.items():
-        if pattern.search(snippet):
-            return f'lobe:{label}'
-    return None
-
-
-def _extract_nodule_type(snippet: str) -> Optional[str]:
-    for pattern, label in NODULE_TYPE_PATTERNS.items():
-        if pattern.search(snippet):
-            return f'type:{label}'
-    return None
-
-
-def _deduplicate(findings: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    seen = set()
-    unique: List[Dict[str, Any]] = []
-    for finding in findings:
-        span = tuple(finding.get('span', ()))  # type: ignore[arg-type]
-        tags = tuple(sorted(finding.get('tags', ())))
-        key = (span, tags)
-        if key in seen:
+        content = report[content_start:next_start].strip()
+        if not content:
             continue
-        seen.add(key)
-        unique.append(finding)
-    return unique
-
-
-def _build_finding(
-    text: str,
-    span_start: int,
-    span_end: int,
-    tags: Iterable[str],
-    confidence: float,
-) -> Dict[str, Any]:
-    snippet = text[span_start:span_end].strip()
-    return {
-        'span': (span_start, span_end),
-        'text': snippet,
-        'tags': list(tags),
-        'confidence': round(max(0.0, min(confidence, 1.0)), 2),
-    }
-
-
-def _detect_pulmonary_nodules(report: str) -> List[Dict[str, Any]]:
-    findings: List[Dict[str, Any]] = []
-    for match in NODULE_PATTERN.finditer(report):
-        span_start, span_end = _line_span(report, match.start())
-        snippet = report[span_start:span_end]
-        tags = ['nodule']
-        confidence = 0.65
-
-        size_tag = _extract_size_tag(snippet)
-        if size_tag:
-            tags.append(size_tag)
-            confidence += 0.1
-
-        lobe_tag = _extract_lobe_tag(snippet)
-        if lobe_tag:
-            tags.append(lobe_tag)
-            confidence += 0.1
-
-        type_tag = _extract_nodule_type(snippet)
-        if type_tag:
-            tags.append(type_tag)
-            confidence += 0.1
-
-        findings.append(_build_finding(report, span_start, span_end, tags, confidence))
-    return findings
-
-
-def _detect_ground_glass(report: str) -> List[Dict[str, Any]]:
-    findings: List[Dict[str, Any]] = []
-    for match in GGO_PATTERN.finditer(report):
-        span_start, span_end = _line_span(report, match.start())
-        findings.append(
-            _build_finding(report, span_start, span_end, ['ggo'], confidence=0.6)
-        )
-    return findings
-
-
-def _detect_consolidation(report: str) -> List[Dict[str, Any]]:
-    findings: List[Dict[str, Any]] = []
-    for match in CONSOLIDATION_PATTERN.finditer(report):
-        span_start, span_end = _line_span(report, match.start())
-        findings.append(
-            _build_finding(
-                report, span_start, span_end, ['consolidation'], confidence=0.55
-            )
-        )
-    return findings
-
-
-def _detect_liver_lesions(report: str) -> List[Dict[str, Any]]:
-    findings: List[Dict[str, Any]] = []
-    for match in LIRADS_PATTERN.finditer(report):
-        span_start, span_end = _line_span(report, match.start())
-        snippet = report[span_start:span_end]
-        category = match.group('lr') or match.group('li') or ''
-        category = category.upper()
-        category_tag = f'li-rads:LR-{category}' if category else 'li-rads'
-        tags = ['liver_lesion', category_tag]
-        if re.search(r'\blesion\b', snippet, re.IGNORECASE):
-            confidence = 0.8
-        else:
-            confidence = 0.7
-        findings.append(_build_finding(report, span_start, span_end, tags, confidence))
-    return findings
-
-
-def _assemble_study_context(report: str, sections: Dict[str, List[Dict[str, Any]]]) -> str:
-    context_parts: List[str] = []
-    for key in ('history', 'indication', 'comparison'):
-        entries = sections.get(key, [])
-        for entry in entries:
-            if entry['text']:
-                context_parts.append(entry['text'])
-                break
-    if context_parts:
-        return '\n'.join(context_parts).strip()
-
-    first_section_start: Optional[int] = None
-    for entries in sections.values():
-        for entry in entries:
-            if first_section_start is None or entry['start'] < first_section_start:
-                first_section_start = entry['start']
-    if first_section_start is not None and first_section_start > 0:
-        preamble = report[:first_section_start].strip()
-        if preamble:
-            return preamble
-    return ''
-
-
-def _extract_impression(sections: Dict[str, List[Dict[str, Any]]]) -> str:
-    for key in ('impression', 'conclusion', 'summary'):
-        entries = sections.get(key, [])
-        for entry in entries:
-            if entry['text']:
-                return entry['text']
-    return ''
-
-
-def _run_heuristic_extractors(report: str) -> List[Dict[str, Any]]:
-    findings: List[Dict[str, Any]] = []
-    for extractor in (
-        _detect_pulmonary_nodules,
-        _detect_ground_glass,
-        _detect_consolidation,
-        _detect_liver_lesions,
-    ):
-        findings.extend(extractor(report))
-    deduped = _deduplicate(findings)
-    deduped.sort(key=lambda item: item['span'][0])
-    return deduped
-
-
-def parse_report(report_text: str) -> Dict[str, Any]:
-    '''
-    Parse a free-text radiology report into structured findings.
-
-    Returns a dictionary composed of the detected study context, impression, and a
-    list of heuristic findings with tagged metadata.
-    '''
-    if not isinstance(report_text, str):
-        return {'study_context': '', 'impression': '', 'findings': []}
-
-    normalized = report_text.replace('\r\n', '\n')
-    sections = _split_sections(normalized)
-    study_context = _assemble_study_context(normalized, sections)
-    impression = _extract_impression(sections)
-    findings = _run_heuristic_extractors(normalized)
-
-    return {
-        'study_context': study_context,
-        'impression': impression,
-        'findings': findings,
-    }
+        canonical = _normalize_header(header)
+        sections.setdefault(canonical, []).append(content)
+    return sections

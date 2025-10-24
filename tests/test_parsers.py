@@ -4,21 +4,21 @@ import base64
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Callable, Iterable
 
 from src.parsers.fhir_parser import FHIRParser
-from src.parsers.report_parser import parse_report
+from src.parsers.report_parser import Finding, ReportParser, parse_report
 
 
-def _find_finding(findings: Iterable[Dict[str, object]], tag: str) -> Dict[str, object]:
+def _select(findings: Iterable[Finding], predicate: Callable[[Finding], bool]) -> Finding:
     for finding in findings:
-        tags = finding.get('tags', [])
-        if isinstance(tags, list) and tag in tags:
+        if predicate(finding):
             return finding
-    raise AssertionError(f'No finding with tag "{tag}" found in {findings!r}')
+    raise AssertionError("Expected finding not located.")
 
 
 def test_parse_report_detects_pulmonary_patterns() -> None:
+    parser = ReportParser()
     report = (
         'History: High-risk lung cancer screening.\n'
         'Technique: Thin-section chest CT with contrast.\n'
@@ -31,23 +31,30 @@ def test_parse_report_detects_pulmonary_patterns() -> None:
         'RUL 6 mm nodule with no suspicious change; likely inflammatory.'
     )
 
-    parsed = parse_report(report)
+    findings = parser.parse(report)
+    assert all(isinstance(item, Finding) for item in findings)
 
-    assert parsed['study_context'].startswith('High-risk lung cancer screening.')
-    assert parsed['impression'] == 'RUL 6 mm nodule with no suspicious change; likely inflammatory.'
+    nodule = _select(findings, lambda item: item.finding_type == 'nodule')
+    assert nodule.size_mm == 6.0
+    assert nodule.location == 'RUL'
+    assert 'solid' in nodule.characteristics
+    assert nodule.confidence >= 0.9
 
-    nodule = _find_finding(parsed['findings'], 'nodule')
-    assert {'nodule', 'size:6mm', 'lobe:RUL', 'type:solid'}.issubset(set(nodule['tags']))  # type: ignore[index]
-    assert nodule['confidence'] >= 0.75  # type: ignore[index]
+    ggo = _select(findings, lambda item: 'ground-glass' in item.characteristics)
+    assert ggo.location == 'LLL'
+    assert ggo.confidence >= 0.6
 
-    ggo = _find_finding(parsed['findings'], 'ggo')
-    assert ggo['confidence'] >= 0.6  # type: ignore[index]
+    consolidation = _select(findings, lambda item: 'consolidation' in item.characteristics)
+    assert consolidation.location == 'LINGULA'
+    assert consolidation.confidence >= 0.6
+    assert 'lingula' in consolidation.context.lower()
 
-    consolidation = _find_finding(parsed['findings'], 'consolidation')
-    assert consolidation['confidence'] >= 0.55  # type: ignore[index]
+    via_helper = parse_report(report)
+    assert all(isinstance(item, Finding) for item in via_helper)
 
 
 def test_parse_report_detects_liver_lesion_li_rads() -> None:
+    parser = ReportParser()
     report = (
         'Indication: Follow-up for hepatic adenomas.\n'
         'Findings:\n'
@@ -57,11 +64,23 @@ def test_parse_report_detects_liver_lesion_li_rads() -> None:
         'Arterial enhancing lesion compatible with LI-RADS 4 observation.'
     )
 
-    parsed = parse_report(report)
+    findings = parser.parse(report)
 
-    liver = _find_finding(parsed['findings'], 'liver_lesion')
-    assert 'li-rads:LR-4' in liver['tags']  # type: ignore[index]
-    assert liver['confidence'] >= 0.7  # type: ignore[index]
+    lesion = _select(findings, lambda item: 'segment vii' in item.context.lower())
+    assert lesion.location == 'Segment VII'
+    assert lesion.size_mm == 21.0
+    assert lesion.finding_type == 'lesion'
+    assert lesion.confidence >= 0.78
+
+    li_rads = _select(findings, lambda item: 'li-rads' in item.context.lower())
+    assert li_rads.confidence >= 0.6
+
+
+def test_extract_measurements_normalises_units() -> None:
+    parser = ReportParser()
+    text = 'Measurements include a 3mm nodule, a 2.5 cm mass, and a 1.2 x 0.8 cm lesion.'
+    measurements = parser.extract_measurements(text)
+    assert measurements == [(3.0, 'mm'), (25.0, 'mm'), (12.0, 'mm')]
 
 
 def test_parse_diagnostic_report_combines_conclusion_and_presented_form() -> None:
