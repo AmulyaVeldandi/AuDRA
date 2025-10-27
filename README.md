@@ -1,306 +1,185 @@
-# 🏥 AuDRA-Rad: Autonomous Radiology Follow-up Assistant
+# AuDRA-Rad: Autonomous Radiology Follow-up Assistant
 
-**Closing the deadliest gap in radiology workflows**
-
-[![Demo Video](https://img.shields.io/badge/Demo-Watch%20Now-red?style=for-the-badge&logo=youtube)](YOUR_VIDEO_URL)
-[![Architecture](https://img.shields.io/badge/Docs-Architecture-blue?style=for-the-badge)](#architecture)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+Closing the deadliest gap in radiology workflows by turning unstructured reports into tracked, guideline-backed care plans.
 
 ---
 
-## 🚨 The Problem
+## Overview
 
-**40% of recommended radiology follow-ups never happen.**
-
-Every day, radiologists identify critical findings—suspicious nodules, incidental masses, early-stage lesions—and recommend follow-up imaging. But these recommendations often fall through the cracks:
-
-- 📋 **Lost in documentation**: Buried in lengthy reports
-- 📞 **No tracking system**: No one ensures follow-up happens  
-- ⏰ **Missed deadlines**: 6-month follow-ups become 18 months
-- 💔 **Late-stage cancers**: Preventable deaths from delayed diagnosis
-
-**Result**: Preventable Stage III/IV cancer diagnoses, malpractice lawsuits, and system-wide care failures.
+AuDRA-Rad combines NVIDIA NIM foundation models, retrieval-augmented generation (RAG), and FHIR-compliant integrations to extract critical findings, match the right guideline, and create follow-up orders inside the EHR. Hospitals can increase follow-up compliance, reduce liability, and deliver timely cancer care.
 
 ---
 
-## ✨ Our Solution
+## Prerequisites
 
-**AuDRA-Rad** transforms radiology reports into actionable care plans automatically.
-
-Using **NVIDIA's Llama-3.1-Nemotron reasoning model** and **Retrieval-Augmented Generation (RAG)**, AuDRA-Rad:
-
-1. 📖 **Reads** radiology reports and extracts clinical findings
-2. 🔍 **Retrieves** the correct medical guidelines (ACR, Fleischner, etc.)
-3. 🧠 **Reasons** about appropriate follow-up recommendations
-4. ✅ **Validates** safety and checks for conflicts
-5. 🎯 **Creates** follow-up orders directly in the EHR
-6. 📊 **Tracks** completion and alerts on missed deadlines
-
-**No more missed follow-ups. No more preventable cancers.**
+- AWS account with permissions to create and manage EKS, ECR, VPC, IAM, and OpenSearch resources
+- Local tooling: `kubectl`, `eksctl`, `docker`, `awscli`, `helm`, `python3`
+- NVIDIA NIM access via [build.nvidia.com](https://build.nvidia.com) with API keys and registry entitlement
+- Hackathon-issued $100 AWS credits (track spend carefully)
+- Optional: `terraform` or AWS CDK if you prefer infrastructure as code
 
 ---
 
-## 🎬 Demo
+## Quick Start
 
-[![AuDRA-Rad Demo](assets/demo_thumbnail.png)](YOUR_VIDEO_URL)
+```bash
+   # Clone repo
+   git clone https://github.com/yourusername/audra-rad.git
+   cd audra-rad
+   
+   # Setup environment
+   cp .env.example .env
+   # Edit .env with your credentials
+   
+   # Index guidelines locally
+   docker-compose up -d  # Start local OpenSearch
+   python scripts/index_guidelines.py --local
+   
+   # Run locally
+   uvicorn src.api.app:app --reload
+   
+   # Test
+   curl -X POST http://localhost:8000/api/v1/process-report \
+     -H "Content-Type: application/json" \
+     -d @data/sample_reports/fhir_chest_ct_ggo.json
+```
 
-**Watch our 3-minute demo** showing:
-- Real radiology report processing
-- Guideline retrieval in action
-- Autonomous task creation
-- EHR integration workflow
+- The `.env` file stores NIM endpoints, API keys, and AWS credentials consumed by the RAG pipeline.
+- Local OpenSearch runs via `docker-compose` with default ports (see `docker-compose.yml` for overrides).
 
 ---
 
-## 🏗️ Architecture
+## Deploy to AWS EKS
 
-AuDRA-Rad is built as an **agentic AI system** using:
+1. **Confirm prerequisites**
+   - AWS CLI configured (`aws sts get-caller-identity`)
+   - `eksctl`, `kubectl`, `helm`, and `docker` installed
+   - NVIDIA NGC/NIM registry access verified (`docker login nvcr.io`)
+2. **Provision infrastructure**
+   - Create EKS cluster and GPU-capable node group
+   - Configure IAM roles, OpenSearch Serverless collection, and ECR repository
+   - Allocate an ACM certificate and Route 53 hosted zone if exposing a public endpoint
+3. **Build and ship the container**
+   - `docker build -t <account>.dkr.ecr.<region>.amazonaws.com/audra-rad:<tag> .`
+   - `aws ecr get-login-password | docker login`
+   - `docker push` to ECR
+4. **Configure Kubernetes addons**
+   - Install AWS VPC CNI, Cluster Autoscaler, metrics server, and ALB Ingress Controller
+   - Apply GPU device plugin DaemonSet (`kubectl apply -f nvidia-device-plugin.yml`)
+5. **Deploy the application**
+   - Apply secrets (`kubectl create secret generic audra-env --from-env-file=.env`)
+   - Apply manifests in `deployment/kubernetes` (`kubectl apply -f deployment/kubernetes/`)
+6. **Validate**
+   - `kubectl get pods -n audra` ensures workloads are ready
+   - `kubectl logs deploy/audra-api -n audra` checks application startup
+   - Hit the ALB endpoint `/healthz` and `/docs`
 
-- **🤖 NVIDIA Llama-3.1-Nemotron-70B-Instruct NIM**: Medical reasoning and decision-making
-- **🔎 NVIDIA Retrieval Embedding NIM (NV-Embed-v2)**: Semantic search of medical guidelines
-- **☸️ Amazon EKS**: Scalable Kubernetes orchestration
-- **🗄️ Amazon OpenSearch Serverless**: Vector database for RAG
-- **🏥 FHIR/HL7 Integration**: Standards-compliant EHR connectivity
+**Cost estimate:** ~\$3/hour for a single g5.xlarge node, OpenSearch Serverless collection, and supporting services. Expect to burn through hackathon credits in ~30 hours of continuous runtime.
 
-### System Architecture
+**Budget tips:** pause node groups overnight, delete unused ALBs, and stop OpenSearch collections when idle.
+
+See `docs/DEPLOYMENT.md` for copy-paste commands, infrastructure diagrams, and troubleshooting screenshots.
+
+---
+
+## Architecture Diagram
 
 ![Architecture Diagram](assets/architecture_diagram.png)
 
-### Data Flow
+- **Radiology ingestion**: FHIR-compatible parser normalizes raw reports into structured findings.
+- **Guideline retrieval**: OpenSearch Serverless stores embedded medical guidelines indexed via the RAG pipeline.
+- **Reasoning engine**: NVIDIA Nemotron NIM evaluates findings against the guideline corpus to generate recommendations.
+- **Validation & safety**: Custom validators enforce guardrails, flag high-risk edge cases, and log decisions.
+- **EHR integration**: FastAPI service exposes REST endpoints and pushes tasks/orders back to hospital systems.
+- **Observability**: CloudWatch metrics, structured logs, and AWS X-Ray traces support operations at scale.
 
-```mermaid
-graph LR
-    A[Radiology Report] --> B[Agent Orchestrator]
-    B --> C[Parse Findings]
-    C --> D[Retrieve Guidelines]
-    D --> E[Reason About Recommendation]
-    E --> F[Validate Safety]
-    F --> G[Generate EHR Task]
-    G --> H[Follow-up Order Created]
-```
-
-**See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design.**
+More system internals live in `docs/ARCHITECTURE.md`.
 
 ---
 
-## 🚀 Quick Start
+## API Documentation
 
-### Prerequisites
+- Interactive docs are available at `https://<your-domain>/docs` (FastAPI Swagger UI).
+- Programmatic schema: `https://<your-domain>/openapi.json`.
+- Refer to `docs/API.md` for request/response examples, status codes, and error dictionary.
 
-- Python 3.10+
-- AWS Account with EKS access
-- NVIDIA NIM API keys (from build.nvidia.com)
-- Docker & kubectl installed
-
-### 1️⃣ Clone Repository
+Example requests:
 
 ```bash
-git clone https://github.com/yourusername/audra-rad.git
-cd audra-rad
-```
-
-### 2️⃣ Setup Environment
-
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment variables
-cp .env.example .env
-# Edit .env with your API keys and endpoints
-```
-
-### 3️⃣ Index Medical Guidelines
-
-```bash
-# One-time setup: embed and store guidelines
-python scripts/index_guidelines.py
-```
-
-### 4️⃣ Run Local API
-
-```bash
-# Start FastAPI server
-uvicorn src.api.app:app --reload --host 0.0.0.0 --port 8000
-
-# Test endpoint
-curl -X POST http://localhost:8000/process-report \
+curl -X POST https://<your-domain>/api/v1/process-report \
+  -H "Authorization: Bearer $AUDRA_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d @data/sample_reports/chest_ct_nodule.json
+  -d @data/sample_reports/fhir_chest_ct_ggo.json
+
+curl -X GET https://<your-domain>/api/v1/orders?status=pending \
+  -H "Authorization: Bearer $AUDRA_API_TOKEN"
 ```
 
-### 5️⃣ Deploy to Amazon EKS
+---
+
+## Demo Video
+
+[![Watch the demo](assets/demo_thumbnail.png)](demo_video.mp4)
+
+The video walks through ingesting a real CT report, guideline retrieval with citations, autonomous EHR follow-up order creation, and clinician-facing alerts inside the dashboard.
+
+---
+
+## Testing
 
 ```bash
-# Deploy NVIDIA NIM microservices and application
-kubectl apply -f deployment/kubernetes/eks/
-
-# Check deployment status
-kubectl get pods -n audra-rad
-
-# Get API endpoint
-kubectl get service audra-api -n audra-rad
+pytest tests/ -v
+./scripts/test_deployment.sh
 ```
 
-**Full deployment guide**: [DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- The deployment smoke test checks Kubernetes manifests, required secrets, and service readiness.
+- Provide `NVIDIA_API_KEY` and `OPENSEARCH_URL` in your environment before running integration tests.
 
 ---
 
-## 📊 Example: Processing a Report
+## Cost Management
 
-**Input**: Chest CT radiology report
+- **Monitor usage**
+  - `kubectl top nodes -n kube-system` (requires metrics-server)
+  - `aws cloudwatch get-metric-statistics --namespace AWS/EKS --metric-name node_cpu_utilization ...`
+- **Pause infrastructure**
+  - `eksctl scale nodegroup --cluster audra --name gpu-workers --nodes 0`
+  - `aws opensearchserverless delete-collection --id audra-guidelines` (recreate when needed)
+- **Set alerts**
+  - Create a CloudWatch billing alarm at \$80 to preserve buffer
+  - Enable AWS Budgets email + SNS notifications for the hackathon credits
 
-```
-FINDINGS:
-There is a 3mm ground-glass opacity in the right upper lobe.
-No solid component identified. No other significant findings.
-
-IMPRESSION:
-3mm subsolid nodule (ground-glass) in RUL. Recommend follow-up 
-per Fleischner guidelines.
-```
-
-**AuDRA-Rad Processing**:
-
-1. **Parsing**: Extracts "3mm ground-glass nodule, RUL"
-2. **Retrieval**: Queries Fleischner 2017 guidelines for subsolid nodules
-3. **Reasoning**: "Solitary SSN <6mm → 6-12 month CT follow-up recommended"
-4. **Validation**: Checks patient history, no contraindications
-5. **Action**: Creates CT chest order in EHR for 6 months from now
-
-**Output**:
-
-```json
-{
-  "status": "success",
-  "finding": {
-    "type": "ground-glass nodule",
-    "size_mm": 3,
-    "location": "right upper lobe"
-  },
-  "guideline": {
-    "source": "Fleischner Society 2017",
-    "recommendation": "CT chest in 6-12 months",
-    "citation": "MacMahon et al. Radiology 2017;284:228-243"
-  },
-  "task_created": {
-    "order_id": "RAD-2025-12345",
-    "procedure": "CT Chest without contrast",
-    "scheduled_date": "2025-04-23",
-    "reason": "Follow-up subsolid pulmonary nodule per Fleischner"
-  }
-}
-```
+Always delete the cluster (`eksctl delete cluster --name audra`) after demos to avoid surprise charges.
 
 ---
 
-## 🛠️ Technology Stack
+## Troubleshooting
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Reasoning LLM** | Llama-3.1-Nemotron-70B-Instruct (NVIDIA NIM) | Medical reasoning, decision-making |
-| **Embeddings** | NV-Embed-v2 (NVIDIA Retrieval NIM) | Semantic search of guidelines |
-| **Orchestration** | Amazon EKS (Kubernetes) | Container orchestration |
-| **Vector DB** | Amazon OpenSearch Serverless | RAG knowledge base |
-| **API Framework** | FastAPI + Pydantic | REST endpoints, validation |
-| **Agent Framework** | LangGraph | Stateful agentic workflows |
-| **EHR Integration** | FHIR R4 | Standards-based interoperability |
+- **Image pull errors**: Run `docker login nvcr.io` and `aws ecr get-login-password` before `kubectl apply`. Ensure the node IAM role has `AmazonEC2ContainerRegistryReadOnly`.
+- **Pods stuck in Init**: Confirm GPU nodes are present (`kubectl get nodes -l nvidia.com/gpu.present=true`) and the NVIDIA device plugin DaemonSet is running.
+- **OpenSearch connection refused**: Verify security group rules, correct endpoint URL in `.env`, and that the collection is started.
+- **Ingress 502/504**: Check ALB target group health, confirm FastAPI service responds at `/healthz`, and inspect `kubectl logs deploy/audra-api -n audra`.
+- **View logs**: `kubectl logs -n audra deploy/audra-api -f`, `kubectl logs -n kube-system ds/nvidia-device-plugin-daemonset`, and `aws logs tail /aws/eks/audra/cluster --follow`.
+
+Need help? Reach the team at `support@audra-rad.dev`.
 
 ---
 
-## 📁 Repository Structure
+## License & Acknowledgments
 
-```
-audra-rad/
-├── src/                    # Source code
-│   ├── agent/              # Agent orchestration (ReAct pattern)
-│   ├── services/           # NIM clients, vector store
-│   ├── parsers/            # Report parsing logic
-│   ├── guidelines/         # RAG pipeline
-│   └── api/                # FastAPI application
-├── deployment/             # Kubernetes/SageMaker configs
-├── data/                   # Medical guidelines, sample reports
-├── docs/                   # Documentation
-├── tests/                  # Unit & integration tests
-└── scripts/                # Setup and utility scripts
-```
+- Licensed under the [MIT License](LICENSE).
+- Built with support from NVIDIA NIM, AWS credit program, and the open radiology community.
+- Medical guideline content courtesy of the Fleischner Society, ACR, and broader evidence-based medicine contributors.
 
 ---
 
-## 🧪 Testing
+## Additional Resources
 
-```bash
-# Run all tests
-pytest tests/
-
-# Run with coverage
-pytest --cov=src tests/
-
-# Test specific component
-pytest tests/test_agent.py -v
-```
-
-**Test coverage**: 85%+ (core agent logic, parsers, guideline matching)
+- `docs/ARCHITECTURE.md` – component deep dive, sequence diagrams, and data contracts
+- `docs/DEPLOYMENT.md` – detailed AWS setup with screenshots and IaC snippets
+- `data/guidelines/` – curated guideline corpus (Fleischner 2017, more coming)
+- `tests/` – unit and integration tests covering parsers, validators, and end-to-end flows
 
 ---
 
-## 🔒 Safety & Compliance
-
-- ✅ **Human-in-the-loop**: High-risk findings flagged for radiologist review
-- ✅ **Audit logging**: Complete decision trail for every recommendation
-- ✅ **HIPAA-ready**: All AWS services in VPC with encryption
-- ✅ **Guideline versioning**: Track which guideline version informed each decision
-- ✅ **FDA considerations**: Designed as CDS tool (not autonomous diagnostic system)
-
----
-
-## 📈 Impact
-
-**If deployed across a 500-bed hospital:**
-
-- 📊 **~50,000 radiology reports/year**
-- 🎯 **~8,000 follow-up recommendations/year**
-- ❌ **Without AuDRA-Rad**: 40% lost → 3,200 missed follow-ups
-- ✅ **With AuDRA-Rad**: 95% completion → 400 missed follow-ups
-
-**Result**: 2,800 additional patients receiving timely follow-up care annually.
-
-**Prevents**: Estimated 50-100 late-stage cancer diagnoses per year at this single facility.
-
----
-
-## 🗺️ Roadmap
-
-- [x] Core agent with Fleischner guidelines
-- [x] EKS deployment pipeline
-- [ ] Multi-guideline support (ACR, Lung-RADS, BI-RADS)
-- [ ] Batch processing for overnight report processing
-- [ ] Dashboard for radiologist review queue
-- [ ] Integration with Epic, Cerner EHRs
-- [ ] Multi-language support (Spanish, Mandarin)
-
----
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **NVIDIA** for NIM microservices and inference platform
-- **AWS** for cloud infrastructure and credits
-- **Fleischner Society** and **ACR** for public medical guidelines
-- **Radiology community** for inspiration and problem validation
-
----
-
-<p align="center">
-  <strong>Built for the NVIDIA + AWS Agentic AI Hackathon 2025</strong><br/>
-  <em>Because every finding deserves follow-through.</em>
-</p>
+**Built for the NVIDIA + AWS Agentic AI Hackathon 2025 – every finding deserves follow-through.**
