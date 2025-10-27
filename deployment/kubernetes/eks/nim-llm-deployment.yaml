@@ -3,8 +3,11 @@ kind: Deployment
 metadata:
   name: nim-llm
   namespace: audra-rad
+  labels:
+    app: nim-llm
+    component: reasoning-engine
 spec:
-  replicas: 1
+  replicas: 1  # Expensive, single replica for demo
   selector:
     matchLabels:
       app: nim-llm
@@ -13,22 +16,89 @@ spec:
       labels:
         app: nim-llm
     spec:
+      # GPU node selector
+      nodeSelector:
+        nvidia.com/gpu: "true"
+        node.kubernetes.io/instance-type: g5.2xlarge
+
+      # Tolerations for GPU nodes
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
       containers:
         - name: nim-llm
-          image: nvcr.io/placeholder/nim-llm:latest
+          image: nvcr.io/nvidia/nim/llama-3.1-nemotron-70b-instruct:latest
+          imagePullPolicy: Always
+
           ports:
             - containerPort: 8000
+              name: http
+              protocol: TCP
+
+          env:
+            - name: NIM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: audra-rad-secrets
+                  key: nim-api-key
+            - name: MODEL_NAME
+              value: "llama-3.1-nemotron-70b-instruct"
+            - name: NIM_SERVER_PORT
+              value: "8000"
+
           resources:
+            requests:
+              nvidia.com/gpu: 1
+              memory: "32Gi"
+              cpu: "8"
             limits:
               nvidia.com/gpu: 1
-              cpu: "4"
-              memory: 16Gi
-            requests:
-              cpu: "2"
-              memory: 8Gi
+              memory: "48Gi"
+              cpu: "16"
+
+          # Probes
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /v1/health
               port: 8000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 120  # Model loading takes time
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 8000
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          # Volume for model cache (optional)
+          volumeMounts:
+            - name: model-cache
+              mountPath: /opt/nim/.cache
+
+      volumes:
+        - name: model-cache
+          emptyDir:
+            sizeLimit: 100Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nim-llm-service
+  namespace: audra-rad
+spec:
+  selector:
+    app: nim-llm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP  # Internal only

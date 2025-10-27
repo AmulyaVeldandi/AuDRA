@@ -3,6 +3,9 @@ kind: Deployment
 metadata:
   name: nim-embedding
   namespace: audra-rad
+  labels:
+    app: nim-embedding
+    component: embedding-service
 spec:
   replicas: 1
   selector:
@@ -13,21 +16,74 @@ spec:
       labels:
         app: nim-embedding
     spec:
+      nodeSelector:
+        nvidia.com/gpu: "true"
+        node.kubernetes.io/instance-type: g5.xlarge  # Smaller GPU for embeddings
+
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
       containers:
         - name: nim-embedding
-          image: nvcr.io/placeholder/nim-embedding:latest
+          image: nvcr.io/nvidia/nim/nv-embed-v2:latest
+          imagePullPolicy: Always
+
           ports:
-            - containerPort: 8000
+            - containerPort: 8001
+              name: http
+              protocol: TCP
+
+          env:
+            - name: NIM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: audra-rad-secrets
+                  key: nim-api-key
+            - name: MODEL_NAME
+              value: "nvidia/nv-embed-v2"
+            - name: NIM_SERVER_PORT
+              value: "8001"
+
           resources:
-            limits:
-              cpu: "4"
-              memory: 8Gi
             requests:
-              cpu: "2"
-              memory: 4Gi
+              nvidia.com/gpu: 1
+              memory: "16Gi"
+              cpu: "4"
+            limits:
+              nvidia.com/gpu: 1
+              memory: "24Gi"
+              cpu: "8"
+
           readinessProbe:
             httpGet:
-              path: /healthz
-              port: 8000
-            initialDelaySeconds: 15
+              path: /v1/health
+              port: 8001
+            initialDelaySeconds: 60
             periodSeconds: 10
+            timeoutSeconds: 5
+
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 8001
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nim-embedding-service
+  namespace: audra-rad
+spec:
+  selector:
+    app: nim-embedding
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001
+      protocol: TCP
+  type: ClusterIP
