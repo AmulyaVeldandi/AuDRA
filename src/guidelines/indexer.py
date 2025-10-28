@@ -155,6 +155,8 @@ class GuidelineIndexer:
         guidelines_dir: str,
         embedding_client: EmbeddingClient,
         vector_store: VectorStore,
+        *,
+        batch_size: int = 50,
     ) -> None:
         """Load, chunk, embed, and index all markdown guidelines."""
 
@@ -222,7 +224,7 @@ class GuidelineIndexer:
                     }
                 )
 
-            vector_store.index_batch(documents, batch_size=50)
+            vector_store.index_batch(documents, batch_size=batch_size)
             guideline_stats.append({"title": title, "chunks": len(chunks)})
 
         if total_chunks:

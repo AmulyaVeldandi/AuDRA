@@ -34,6 +34,8 @@ AuDRA-Rad combines NVIDIA NIM foundation models, retrieval-augmented generation 
    # Index guidelines locally
    docker-compose up -d  # Start local OpenSearch
    python scripts/index_guidelines.py --local
+   python scripts/seed_sample_data.py --dry-run  # Preview demo payloads
+   python scripts/test_nim_connection.py --embeddings --llm
    
    # Run locally
    uvicorn src.api.app:app --reload
@@ -46,6 +48,24 @@ AuDRA-Rad combines NVIDIA NIM foundation models, retrieval-augmented generation 
 
 - The `.env` file stores NIM endpoints, API keys, and AWS credentials consumed by the RAG pipeline.
 - Local OpenSearch runs via `docker-compose` with default ports (see `docker-compose.yml` for overrides).
+
+---
+
+## Environment Configuration
+
+Populate `.env` (or your shell) with the values below before running the CLI helpers or API:
+
+| Variable | Purpose | Required | Example |
+| --- | --- | --- | --- |
+| `ENVIRONMENT` | Controls logging format & env validation | always | `dev` |
+| `NIM_LLM_ENDPOINT` | Nemotron NIM base URL | for LLM features | `https://integrate.api.nvidia.com/v1` |
+| `NIM_LLM_API_KEY` | Nemotron API key | for LLM features | `nvai-...` |
+| `NIM_EMBEDDING_ENDPOINT` | NV-Embed base URL | for guideline indexing | `https://integrate.api.nvidia.com/v1` |
+| `NIM_EMBEDDING_API_KEY` | NV-Embed API key | for guideline indexing | `nvai-...` |
+| `OPENSEARCH_ENDPOINT` | OpenSearch endpoint URL | staging/prod or custom local port | `https://search-your-domain...` |
+| `AWS_REGION` | Region for OpenSearch Serverless signing | staging/prod | `us-west-2` |
+
+If `ENVIRONMENT` is set to `staging` or `prod`, the application enforces that all NIM and OpenSearch variables are present. For local development with `docker-compose`, you can leave `OPENSEARCH_ENDPOINT` unset to use `http://localhost:9200`.
 
 ---
 
@@ -137,6 +157,16 @@ pytest tests/ -v
 
 ---
 
+## CLI Utilities
+
+- `scripts/index_guidelines.py` - chunk guideline markdown files, call NV-Embed, and upsert vectors. Flags:
+  - `--local` to force `http://localhost:9200`
+  - `--drop-existing` to recreate the index
+- `scripts/seed_sample_data.py` - generate demo ServiceRequests for the bundled sample DiagnosticReports. Defaults to the mock EHR; pass `--remote --ehr-base-url=https://your-ehr` to hit a live endpoint.
+- `scripts/test_nim_connection.py` - smoke test NV-Embed and Nemotron connectivity. Disable individual checks with `--no-embeddings` or `--no-llm`.
+
+---
+
 ## Cost Management
 
 - **Monitor usage**
@@ -175,11 +205,11 @@ Need help? Reach the team at `support@audra-rad.dev`.
 
 ## Additional Resources
 
-- `docs/ARCHITECTURE.md` – component deep dive, sequence diagrams, and data contracts
-- `docs/DEPLOYMENT.md` – detailed AWS setup with screenshots and IaC snippets
-- `data/guidelines/` – curated guideline corpus (Fleischner 2017, more coming)
-- `tests/` – unit and integration tests covering parsers, validators, and end-to-end flows
+- `docs/ARCHITECTURE.md` - component deep dive, sequence diagrams, and data contracts
+- `docs/DEPLOYMENT.md` - detailed AWS setup with screenshots and IaC snippets
+- `data/guidelines/` - curated guideline corpus (Fleischner 2017, more coming)
+- `tests/` - unit and integration tests covering parsers, validators, and end-to-end flows
 
 ---
 
-**Built for the NVIDIA + AWS Agentic AI Hackathon 2025 – every finding deserves follow-through.**
+**Built for the NVIDIA + AWS Agentic AI Hackathon 2025 - every finding deserves follow-through.**
